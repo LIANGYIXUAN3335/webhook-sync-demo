@@ -72,8 +72,9 @@ class ScriptedTransport:
             raise httpx.ReadTimeout("simulated timeout", request=request)
         if action == "network":
             raise httpx.ConnectError("simulated connection refused", request=request)
-        resp = self.tc.request(request.method, request.url.path, content=request.content,
-                               headers=dict(request.headers))
+        resp = self.tc.request(
+            request.method, request.url.path, content=request.content, headers=dict(request.headers)
+        )
         if action == "timeout_after_commit":
             raise httpx.ReadTimeout("simulated timeout after commit", request=request)
         return httpx.Response(resp.status_code, headers=resp.headers, content=resp.content)

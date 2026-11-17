@@ -26,11 +26,15 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 STATUSES = ["pending", "processing", "retrying", "succeeded", "failed", "ignored"]
-SIMULATED_TYPES = ["checkout.session.completed", "checkout.session.async_payment_succeeded",
-                   "checkout.session.expired"]
+SIMULATED_TYPES = [
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.expired",
+]
 
 
 # --- template helpers ----------------------------------------------------------------
+
 
 def _fmt_time(ts: float | None) -> str:
     return datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "—"
@@ -106,9 +110,15 @@ def _require_simulator(request: Request) -> None:
 
 # --- pages ---------------------------------------------------------------------------
 
+
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, status: str | None = None, q: str | None = None,
-              msg: str | None = None, level: str = "info"):
+def dashboard(
+    request: Request,
+    status: str | None = None,
+    q: str | None = None,
+    msg: str | None = None,
+    level: str = "info",
+):
     if status not in STATUSES:
         status = None
     ctx = _live_context(request, status, (q or "").strip() or None)
@@ -121,8 +131,9 @@ def live_partial(request: Request, status: str | None = None, q: str | None = No
     """Auto-refresh fragment: counts, events table, orders, fault queue."""
     if status not in STATUSES:
         status = None
-    return templates.TemplateResponse(request, "_live_partial.html",
-                                      _live_context(request, status, (q or "").strip() or None))
+    return templates.TemplateResponse(
+        request, "_live_partial.html", _live_context(request, status, (q or "").strip() or None)
+    )
 
 
 @router.get("/events/{event_id}", response_class=HTMLResponse)
@@ -136,22 +147,36 @@ def event_detail(request: Request, event_id: str, msg: str | None = None, level:
     attempts = events.list_attempts(path, event_id)
     timeline, prev_finished = [], None
     for a in attempts:
-        timeline.append({
-            "a": a,
-            "duration": (a["finished_at"] - a["started_at"]) if a["finished_at"] else None,
-            "waited": (a["started_at"] - prev_finished) if prev_finished else None,
-        })
+        timeline.append(
+            {
+                "a": a,
+                "duration": (a["finished_at"] - a["started_at"]) if a["finished_at"] else None,
+                "waited": (a["started_at"] - prev_finished) if prev_finished else None,
+            }
+        )
         prev_finished = a["finished_at"] or prev_finished
-    return templates.TemplateResponse(request, "event_detail.html", {
-        "request": request, "event": row, "payload": payload, "order": order,
-        "timeline": timeline,
-        "idempotency_key": f"checkout_session:{row['checkout_session_id']}" if row["checkout_session_id"] else None,
-        "terminal": row["status"] in {"succeeded", "failed", "ignored"},
-        "settings": _settings(request), "msg": msg, "level": level,
-    })
+    return templates.TemplateResponse(
+        request,
+        "event_detail.html",
+        {
+            "request": request,
+            "event": row,
+            "payload": payload,
+            "order": order,
+            "timeline": timeline,
+            "idempotency_key": (
+                f"checkout_session:{row['checkout_session_id']}" if row["checkout_session_id"] else None
+            ),
+            "terminal": row["status"] in {"succeeded", "failed", "ignored"},
+            "settings": _settings(request),
+            "msg": msg,
+            "level": level,
+        },
+    )
 
 
 # --- actions -------------------------------------------------------------------------
+
 
 @router.post("/events/{event_id}/replay")
 def replay(request: Request, event_id: str):
@@ -165,26 +190,50 @@ def replay(request: Request, event_id: str):
 def replay_failed(request: Request):
     s = _settings(request)
     n = events.replay_all_failed(s.database_path, s.max_attempts)
-    return _redirect(request, f"Replay queued for {n} failed event(s)" if n else "No failed events to replay",
-                     "ok" if n else "info")
+    return _redirect(
+        request,
+        f"Replay queued for {n} failed event(s)" if n else "No failed events to replay",
+        "ok" if n else "info",
+    )
+
+
+@router.get("/api/info")
+def api_info(request: Request) -> dict:
+    """Non-secret runtime settings (used by scripts/demo_all.py)."""
+    s = _settings(request)
+    return {
+        "max_attempts": s.max_attempts,
+        "retry_base_seconds": s.retry_base_seconds,
+        "retry_max_seconds": s.retry_max_seconds,
+        "order_api_timeout_seconds": s.order_api_timeout_seconds,
+        "simulator_enabled": s.enable_simulator,
+        "worker_enabled": s.worker_enabled,
+    }
 
 
 @router.get("/api/events")
-def api_events(request: Request, status: str | None = None) -> JSONResponse:
-    rows = events.list_events(_settings(request).database_path, status)
-    return JSONResponse([{k: r[k] for k in r.keys() if k != "payload"} for r in rows])
+def api_events(request: Request, status: str | None = None, q: str | None = None) -> JSONResponse:
+    rows = events.list_events(_settings(request).database_path, status, q)
+    # sqlite3.Row iterates over values, not keys, so .keys() is required here.
+    return JSONResponse([{k: r[k] for k in r.keys() if k != "payload"} for r in rows])  # noqa: SIM118
 
 
 # --- offline simulator ---------------------------------------------------------------
+
 
 async def _deliver(request: Request, payload: str, signature: str) -> httpx.Response:
     """POST to our own webhook endpoint through the ASGI app (no network involved)."""
     transport = httpx.ASGITransport(app=request.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://simulator.local") as c:
-        return await c.post("/webhooks/stripe", content=payload, headers={
-            "Content-Type": "application/json", "Stripe-Signature": signature,
-            "User-Agent": "webhook-sync-demo-simulator",
-        })
+        return await c.post(
+            "/webhooks/stripe",
+            content=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Stripe-Signature": signature,
+                "User-Agent": "webhook-sync-demo-simulator",
+            },
+        )
 
 
 def _describe(resp: httpx.Response) -> tuple[str, str]:
@@ -246,8 +295,10 @@ async def simulate_async_succeeded(request: Request, event_id: str):
         raise HTTPException(404, "checkout session event not found")
     session = json.loads(row["payload"])["data"]["object"]
     event = synthetic.build_checkout_completed_event(
-        order_id=row["order_id"], amount_total=session.get("amount_total") or 0,
-        currency=session.get("currency") or "usd", payment_status="paid",
+        order_id=row["order_id"],
+        amount_total=session.get("amount_total") or 0,
+        currency=session.get("currency") or "usd",
+        payment_status="paid",
         session_id=row["checkout_session_id"],
         event_type="checkout.session.async_payment_succeeded",
     )
@@ -278,4 +329,6 @@ def clear_faults(request: Request):
 def reset(request: Request):
     _require_simulator(request)
     db.reset_demo_data(_settings(request).database_path)
-    return _redirect(request, "Demo data reset: events cleared, synthetic orders back to pending", "ok", to="/")
+    return _redirect(
+        request, "Demo data reset: events cleared, synthetic orders back to pending", "ok", to="/"
+    )

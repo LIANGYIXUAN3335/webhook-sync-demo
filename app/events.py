@@ -59,9 +59,20 @@ def record_delivery(path: str, event: dict, raw_payload: str, max_attempts: int)
             RETURNING delivery_count, status
             """,
             (
-                event["id"], event_type, int(bool(event.get("livemode"))), raw_payload,
-                session_id, order_id, status, max_attempts, next_attempt_at, last_error,
-                now, now, now, completed_at,
+                event["id"],
+                event_type,
+                int(bool(event.get("livemode"))),
+                raw_payload,
+                session_id,
+                order_id,
+                status,
+                max_attempts,
+                next_attempt_at,
+                last_error,
+                now,
+                now,
+                now,
+                completed_at,
             ),
         ).fetchone()
     return DeliveryResult(

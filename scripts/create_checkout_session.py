@@ -20,10 +20,13 @@ from app.config import Settings
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("order_id", choices=[o[0] for o in db.SYNTHETIC_ORDERS])
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000",
-                        help="where the browser returns after checkout")
+    parser.add_argument(
+        "--base-url", default="http://127.0.0.1:8000", help="where the browser returns after checkout"
+    )
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
@@ -32,29 +35,34 @@ def main(argv: list[str] | None = None) -> int:
         print("STRIPE_API_KEY is not set (see .env.example)", file=sys.stderr)
         return 2
     if not key.startswith(("sk_test_", "rk_test_")):
-        print("Refusing to run: STRIPE_API_KEY must be a sandbox/test key (sk_test_/rk_test_).",
-              file=sys.stderr)
+        print(
+            "Refusing to run: STRIPE_API_KEY must be a sandbox/test key (sk_test_/rk_test_).", file=sys.stderr
+        )
         return 2
 
     order = next(o for o in db.SYNTHETIC_ORDERS if o[0] == args.order_id)
     order_id, _name, _email, amount, currency = order
     client = stripe.StripeClient(key)
-    session = client.v1.checkout.sessions.create(params={
-        "mode": "payment",
-        "line_items": [{
-            "quantity": 1,
-            "price_data": {
-                "currency": currency,
-                "unit_amount": amount,
-                "product_data": {"name": f"Synthetic demo order {order_id}"},
-            },
-        }],
-        # Both carry the order reference; the webhook handler reads metadata first.
-        "client_reference_id": order_id,
-        "metadata": {"order_id": order_id},
-        "success_url": f"{args.base_url}/?msg=Checkout+completed+for+{order_id}&level=ok",
-        "cancel_url": f"{args.base_url}/?msg=Checkout+canceled&level=warn",
-    })
+    session = client.v1.checkout.sessions.create(
+        params={
+            "mode": "payment",
+            "line_items": [
+                {
+                    "quantity": 1,
+                    "price_data": {
+                        "currency": currency,
+                        "unit_amount": amount,
+                        "product_data": {"name": f"Synthetic demo order {order_id}"},
+                    },
+                }
+            ],
+            # Both carry the order reference; the webhook handler reads metadata first.
+            "client_reference_id": order_id,
+            "metadata": {"order_id": order_id},
+            "success_url": f"{args.base_url}/?msg=Checkout+completed+for+{order_id}&level=ok",
+            "cancel_url": f"{args.base_url}/?msg=Checkout+canceled&level=warn",
+        }
+    )
     print(f"Checkout Session {session.id} for {order_id} ({amount / 100:.2f} {currency.upper()})")
     print(f"Open and pay with test card 4242 4242 4242 4242:\n{session.url}")
     return 0

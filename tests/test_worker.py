@@ -1,6 +1,6 @@
 import pytest
 
-from app import db, events, oms, synthetic
+from app import events, oms, synthetic
 from tests.helpers import post_event
 
 
@@ -74,7 +74,10 @@ def test_transient_failures_then_recovery(client, settings, worker, transport, c
     assert order(settings)["status"] == "paid"
     assert order(settings)["update_count"] == 1
     assert attempts(settings, event["id"]) == [
-        ("retry", 429), ("retry", 503), ("retry", None), ("succeeded", 200)
+        ("retry", 429),
+        ("retry", 503),
+        ("retry", None),
+        ("succeeded", 200),
     ]
 
 

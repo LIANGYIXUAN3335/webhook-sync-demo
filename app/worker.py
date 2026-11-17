@@ -21,13 +21,14 @@ Safety properties:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import random
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import httpx
 
@@ -90,13 +91,18 @@ def sync_event(row, client: OrderApiClient) -> Outcome:
     if not session.get("id"):
         return Outcome("failed", "event has no checkout session id")
     if session.get("payment_status") != "paid":
-        return Outcome("ignored", f"payment_status={session.get('payment_status')!r}; waiting for "
-                                  "checkout.session.async_payment_succeeded")
+        return Outcome(
+            "ignored",
+            f"payment_status={session.get('payment_status')!r}; waiting for "
+            "checkout.session.async_payment_succeeded",
+        )
 
     try:
         resp = client.mark_paid(row["order_id"], session, row["id"])
     except httpx.TimeoutException as exc:
-        return Outcome("retry", f"timeout after {client.timeout:g}s calling order service ({type(exc).__name__})")
+        return Outcome(
+            "retry", f"timeout after {client.timeout:g}s calling order service ({type(exc).__name__})"
+        )
     except httpx.TransportError as exc:
         return Outcome("retry", f"network error calling order service: {exc}")
 
@@ -108,10 +114,8 @@ def sync_event(row, client: OrderApiClient) -> Outcome:
         return Outcome("succeeded", note, code)
     if code == 429 or code >= 500:
         retry_after = None
-        try:
+        with contextlib.suppress(ValueError):  # absent, or an HTTP-date we don't parse
             retry_after = float(resp.headers.get("Retry-After", ""))
-        except ValueError:
-            pass
         return Outcome("retry", _error_text(resp), code, retry_after)
     return Outcome("failed", _error_text(resp), code)
 
@@ -181,7 +185,9 @@ class Worker:
         if kind == "retry":
             if row["cycle_attempts"] >= row["max_attempts"]:
                 kind = "failed"
-                error = f"retries exhausted after {row['cycle_attempts']} attempts; last error: {outcome.detail}"
+                error = (
+                    f"retries exhausted after {row['cycle_attempts']} attempts; last error: {outcome.detail}"
+                )
             else:
                 next_attempt_at = now + self.backoff_delay(row["cycle_attempts"], outcome.retry_after)
         status = {"retry": "retrying"}.get(kind, kind)
@@ -201,8 +207,7 @@ class Worker:
             conn.execute(
                 "UPDATE event_attempts SET finished_at = ?, outcome = ?, http_status = ?, error = ?"
                 " WHERE id = ?",
-                (now, kind, outcome.http_status,
-                 outcome.detail if kind != "failed" else error, attempt_id),
+                (now, kind, outcome.http_status, outcome.detail if kind != "failed" else error, attempt_id),
             )
         if cur.rowcount == 0:
             log.warning("lost lease on %s; result of attempt %s discarded", row["id"], row["attempts"])

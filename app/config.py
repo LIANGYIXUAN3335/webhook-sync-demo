@@ -35,7 +35,7 @@ class Settings:
     retry_jitter: bool = True
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         load_dotenv()
         env = os.environ.get
         return cls(

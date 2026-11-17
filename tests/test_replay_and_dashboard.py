@@ -76,7 +76,7 @@ def test_replays_and_redeliveries_together_update_order_once(client, settings, w
     exhaust(worker, clock, settings)
     client.post(f"/events/{event['id']}/replay")
     client.post(f"/events/{event['id']}/replay")  # double click: second is a no-op
-    post_event(client, event)                       # plus a Stripe redelivery
+    post_event(client, event)  # plus a Stripe redelivery
     client.post(f"/simulate/redeliver/{event['id']}")
     worker.run_until_idle(now=clock.now + 3600)
     row = ev(settings, event["id"])

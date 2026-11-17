@@ -23,8 +23,9 @@ def _configure_logging() -> None:
     logger = logging.getLogger("webhook_sync")
     if not logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-                                               "%H:%M:%S"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
+        )
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False
@@ -61,4 +62,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"ok": True}
 
     return app
-

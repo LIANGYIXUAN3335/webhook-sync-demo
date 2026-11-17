@@ -40,8 +40,9 @@ def test_invalid_signature_is_rejected_and_not_stored(client, settings, case):
         headers["Stripe-Signature"] = "t=123,v1=deadbeef"
     elif case == "stale_timestamp":
         # Correctly signed, but outside Stripe's default 5-minute tolerance (replay attack).
-        headers["Stripe-Signature"] = synthetic.sign(payload, settings.stripe_webhook_secret,
-                                                     int(time.time()) - 3600)
+        headers["Stripe-Signature"] = synthetic.sign(
+            payload, settings.stripe_webhook_secret, int(time.time()) - 3600
+        )
     elif case == "tampered_body":
         headers["Stripe-Signature"] = synthetic.sign(payload, settings.stripe_webhook_secret)
         payload = payload.replace('"amount_total":2500', '"amount_total":1')

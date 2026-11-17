@@ -47,9 +47,16 @@ async def stripe_webhook(request: Request) -> JSONResponse:
     )
     log.info(
         "webhook %s type=%s duplicate=%s deliveries=%d",
-        result.event_id, event.get("type"), result.duplicate, result.delivery_count,
+        result.event_id,
+        event.get("type"),
+        result.duplicate,
+        result.delivery_count,
     )
     return JSONResponse(
-        {"received": True, "event_id": result.event_id, "duplicate": result.duplicate,
-         "status": result.status}
+        {
+            "received": True,
+            "event_id": result.event_id,
+            "duplicate": result.duplicate,
+            "status": result.status,
+        }
     )

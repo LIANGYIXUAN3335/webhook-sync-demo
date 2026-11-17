@@ -22,7 +22,8 @@ def test_async_payment_unpaid_then_succeeded_updates_order_once(client, settings
     assert oms.get_order(settings.database_path, "ord_demo_1001")["status"] == "pending"
 
     settled = synthetic.build_checkout_completed_event(
-        "ord_demo_1001", session_id=session_id,
+        "ord_demo_1001",
+        session_id=session_id,
         event_type="checkout.session.async_payment_succeeded",
     )
     post_event(client, settled)
@@ -63,8 +64,11 @@ def test_replay_all_failed(client, settings, worker, clock):
     assert "2+failed+event" in resp.headers["location"]
     worker.run_until_idle()
     assert events.status_counts(settings.database_path) == {"succeeded": 2}
-    assert client.post("/events/replay-failed", follow_redirects=False).headers["location"].endswith(
-        "msg=No+failed+events+to+replay&level=info")
+    assert (
+        client.post("/events/replay-failed", follow_redirects=False)
+        .headers["location"]
+        .endswith("msg=No+failed+events+to+replay&level=info")
+    )
 
 
 def test_flash_redirect_never_leaves_the_site(client):
@@ -81,8 +85,14 @@ def test_concurrent_workers_update_each_order_once(client, settings):
     """Four workers race over one queue that contains duplicates (same event ID) and
     distinct events for the same Checkout Session. Every order must change exactly once
     and every event must be attempted exactly once."""
-    order_ids = ["ord_demo_1001", "ord_demo_1002", "ord_demo_1003", "ord_demo_1004",
-                 "ord_demo_1005", "ord_demo_1006"]
+    order_ids = [
+        "ord_demo_1001",
+        "ord_demo_1002",
+        "ord_demo_1003",
+        "ord_demo_1004",
+        "ord_demo_1005",
+        "ord_demo_1006",
+    ]
     sent = []
     for oid in order_ids:
         ev = synthetic.build_checkout_completed_event(oid)
@@ -94,16 +104,19 @@ def test_concurrent_workers_update_each_order_once(client, settings):
     def handler(request: httpx.Request) -> httpx.Response:
         order_id = request.url.path.split("/")[2]
         status, body, replayed = oms.apply_payment(
-            settings.database_path, order_id, request.headers.get("idempotency-key"),
+            settings.database_path,
+            order_id,
+            request.headers.get("idempotency-key"),
             json.loads(request.content),
         )
         time.sleep(0.002)  # widen the race window
-        return httpx.Response(status, json=body,
-                              headers={"Idempotent-Replayed": "true"} if replayed else {})
+        return httpx.Response(status, json=body, headers={"Idempotent-Replayed": "true"} if replayed else {})
 
     workers = [
-        Worker(settings, OrderApiClient("http://oms.test", 2,
-                                        httpx.Client(transport=httpx.MockTransport(handler))))
+        Worker(
+            settings,
+            OrderApiClient("http://oms.test", 2, httpx.Client(transport=httpx.MockTransport(handler))),
+        )
         for _ in range(4)
     ]
     start = threading.Barrier(len(workers))

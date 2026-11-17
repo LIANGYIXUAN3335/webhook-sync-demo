@@ -37,6 +37,7 @@ FAULT_MODES = {
 
 # --- fault queue -------------------------------------------------------------------
 
+
 def push_faults(path: str, mode: str, count: int = 1) -> None:
     if mode not in FAULT_MODES:
         raise ValueError(f"unknown fault mode {mode!r}")
@@ -67,6 +68,7 @@ def clear_faults(path: str) -> None:
 
 # --- orders --------------------------------------------------------------------------
 
+
 def list_orders(path: str):
     with db.session(path) as conn:
         return conn.execute("SELECT * FROM orders ORDER BY id").fetchall()
@@ -77,8 +79,9 @@ def get_order(path: str, order_id: str):
         return conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
 
 
-def apply_payment(path: str, order_id: str, idempotency_key: str | None, body: dict
-                  ) -> tuple[int, dict, bool]:
+def apply_payment(
+    path: str, order_id: str, idempotency_key: str | None, body: dict
+) -> tuple[int, dict, bool]:
     """Mark an order paid. Returns (status_code, response_body, idempotent_replay)."""
     session_id = body.get("checkout_session_id")
     if not idempotency_key:
@@ -88,9 +91,7 @@ def apply_payment(path: str, order_id: str, idempotency_key: str | None, body: d
 
     now = time.time()
     with db.transaction(path) as conn:
-        seen = conn.execute(
-            "SELECT * FROM oms_idempotency WHERE key = ?", (idempotency_key,)
-        ).fetchone()
+        seen = conn.execute("SELECT * FROM oms_idempotency WHERE key = ?", (idempotency_key,)).fetchone()
         if seen is not None:
             if seen["order_id"] != order_id:
                 return 422, {"error": "Idempotency-Key was already used for a different order"}, False
@@ -101,8 +102,16 @@ def apply_payment(path: str, order_id: str, idempotency_key: str | None, body: d
             return 404, {"error": f"order {order_id} not found"}, False
         if order["status"] == "paid":
             if order["paid_session_id"] == session_id:
-                return 200, {"order_id": order_id, "status": "paid", "applied": False,
-                             "note": "already paid by this checkout session"}, True
+                return (
+                    200,
+                    {
+                        "order_id": order_id,
+                        "status": "paid",
+                        "applied": False,
+                        "note": "already paid by this checkout session",
+                    },
+                    True,
+                )
             return 409, {"error": f"order {order_id} already paid by {order['paid_session_id']}"}, False
 
         # Conditional update: only a pending order can transition to paid.
@@ -113,8 +122,12 @@ def apply_payment(path: str, order_id: str, idempotency_key: str | None, body: d
         )
         if cur.rowcount != 1:  # unreachable under BEGIN IMMEDIATE, but never double-apply
             return 409, {"error": f"order {order_id} changed concurrently"}, False
-        response = {"order_id": order_id, "status": "paid", "applied": True,
-                    "checkout_session_id": session_id}
+        response = {
+            "order_id": order_id,
+            "status": "paid",
+            "applied": True,
+            "checkout_session_id": session_id,
+        }
         conn.execute(
             "INSERT INTO oms_idempotency (key, order_id, status_code, response_json, created_at)"
             " VALUES (?, ?, ?, ?, ?)",
@@ -124,6 +137,7 @@ def apply_payment(path: str, order_id: str, idempotency_key: str | None, body: d
 
 
 # --- HTTP routes ---------------------------------------------------------------------
+
 
 @router.post("/orders/{order_id}/payments")
 async def mark_paid(
@@ -139,17 +153,14 @@ async def mark_paid(
     if fault in {"503", "500"}:
         return JSONResponse({"error": f"injected fault {fault}"}, status_code=int(fault))
     if fault == "429":
-        return JSONResponse({"error": "injected fault 429"}, status_code=429,
-                            headers={"Retry-After": "2"})
+        return JSONResponse({"error": "injected fault 429"}, status_code=429, headers={"Retry-After": "2"})
     if fault == "400":
         return JSONResponse({"error": "injected fault 400: malformed request"}, status_code=400)
     if fault == "timeout":
         await asyncio.sleep(settings.mock_oms_stall_seconds)
         return JSONResponse({"error": "injected timeout"}, status_code=504)
 
-    status, payload, replayed = await run_in_threadpool(
-        apply_payment, path, order_id, idempotency_key, body
-    )
+    status, payload, replayed = await run_in_threadpool(apply_payment, path, order_id, idempotency_key, body)
     if fault == "timeout_after_commit":
         # The update is committed, but the caller gives up before seeing the response.
         await asyncio.sleep(settings.mock_oms_stall_seconds)

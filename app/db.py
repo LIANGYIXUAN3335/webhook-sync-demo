@@ -9,8 +9,8 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 SCHEMA = """
 -- One row per Stripe event ID. The primary key is the deduplication boundary.
