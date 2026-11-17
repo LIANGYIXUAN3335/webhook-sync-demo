@@ -14,7 +14,12 @@
 
 <div class="layout">
   <section class="card card-main">
-    <h2>Events{% if status_filter %} <span class="muted">· {{ status_filter }}</span>{% endif %}</h2>
+    <div class="card-head">
+      <h2>Events{% if status_filter %} <span class="muted">· {{ status_filter }}</span>{% endif %}</h2>
+      <form method="post" action="/events/replay-failed" onsubmit="return confirm('Re-queue every failed event with a fresh retry budget?')">
+        <button class="btn btn-sm">Replay all failed</button>
+      </form>
+    </div>
     {{ events_table() }}
   </section>
 
@@ -36,6 +41,11 @@
             <option value="__none__">no order reference (→ permanent)</option>
           </select>
         </label>
+        <label>Event type
+          <select name="event_type">
+            {% for t in simulated_types %}<option>{{ t }}</option>{% endfor %}
+          </select>
+        </label>
         <div class="row">
           <label>payment_status
             <select name="payment_status"><option>paid</option><option>unpaid</option></select>
@@ -44,7 +54,7 @@
             <select name="signature"><option value="valid">valid</option><option value="invalid">invalid (→ 400)</option></select>
           </label>
         </div>
-        <button class="btn btn-primary">Send checkout.session.completed</button>
+        <button class="btn btn-primary">Send signed event</button>
       </form>
     </section>
 

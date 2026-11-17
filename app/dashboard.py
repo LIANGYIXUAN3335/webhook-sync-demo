@@ -12,7 +12,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -26,6 +26,8 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 STATUSES = ["pending", "processing", "retrying", "succeeded", "failed", "ignored"]
+SIMULATED_TYPES = ["checkout.session.completed", "checkout.session.async_payment_succeeded",
+                   "checkout.session.expired"]
 
 
 # --- template helpers ----------------------------------------------------------------
@@ -59,10 +61,16 @@ def _settings(request: Request):
 
 
 def _redirect(request: Request, msg: str, level: str = "info", to: str | None = None) -> RedirectResponse:
-    target = to or request.headers.get("referer") or "/"
-    target = target.split("?msg=")[0].split("&msg=")[0]
-    sep = "&" if "?" in target else "?"
-    return RedirectResponse(f"{target}{sep}{urlencode({'msg': msg, 'level': level})}", status_code=303)
+    """Redirect back (POST/redirect/GET) with a flash message.
+
+    Only the path and query of the Referer are used, so the redirect always stays on
+    this site even if the header points elsewhere (no open redirect).
+    """
+    parts = urlsplit(to or request.headers.get("referer") or "/")
+    path = parts.path if parts.path.startswith("/") and not parts.path.startswith("//") else "/"
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k not in {"msg", "level"}]
+    query += [("msg", msg), ("level", level)]
+    return RedirectResponse(f"{path}?{urlencode(query)}", status_code=303)
 
 
 def _live_context(request: Request, status: str | None) -> dict:
@@ -78,6 +86,7 @@ def _live_context(request: Request, status: str | None) -> dict:
         "orders": oms.list_orders(path),
         "faults": oms.list_faults(path),
         "fault_modes": oms.FAULT_MODES,
+        "simulated_types": SIMULATED_TYPES,
     }
 
 
@@ -131,6 +140,14 @@ def replay(request: Request, event_id: str):
     return _redirect(request, f"{event_id} is not in 'failed' state; nothing replayed", "warn")
 
 
+@router.post("/events/replay-failed")
+def replay_failed(request: Request):
+    s = _settings(request)
+    n = events.replay_all_failed(s.database_path, s.max_attempts)
+    return _redirect(request, f"Replay queued for {n} failed event(s)" if n else "No failed events to replay",
+                     "ok" if n else "info")
+
+
 @router.get("/api/events")
 def api_events(request: Request, status: str | None = None) -> JSONResponse:
     rows = events.list_events(_settings(request).database_path, status)
@@ -164,6 +181,7 @@ async def simulate_checkout(
     order_id: str = Form(...),
     payment_status: str = Form("paid"),
     signature: str = Form("valid"),
+    event_type: str = Form("checkout.session.completed"),
 ):
     _require_simulator(request)
     s = _settings(request)
@@ -173,6 +191,7 @@ async def simulate_checkout(
         amount_total=order["amount_cents"] if order else 1000,
         currency=order["currency"] if order else "usd",
         payment_status=payment_status,
+        event_type=event_type if event_type in SIMULATED_TYPES else "checkout.session.completed",
     )
     payload = synthetic.encode(event)
     secret = s.stripe_webhook_secret if signature == "valid" else "whsec_attacker_guess"
@@ -193,6 +212,28 @@ async def simulate_redeliver(request: Request, event_id: str):
     resp = await _deliver(request, row["payload"], synthetic.sign(row["payload"], s.stripe_webhook_secret))
     msg, level = _describe(resp)
     return _redirect(request, msg, level)
+
+
+@router.post("/simulate/async-succeeded/{event_id}")
+async def simulate_async_succeeded(request: Request, event_id: str):
+    """Follow an unpaid checkout.session.completed with the async_payment_succeeded event
+    Stripe sends once a delayed payment method settles (same Checkout Session)."""
+    _require_simulator(request)
+    s = _settings(request)
+    row = await run_in_threadpool(events.get_event, s.database_path, event_id)
+    if row is None or not row["checkout_session_id"]:
+        raise HTTPException(404, "checkout session event not found")
+    session = json.loads(row["payload"])["data"]["object"]
+    event = synthetic.build_checkout_completed_event(
+        order_id=row["order_id"], amount_total=session.get("amount_total") or 0,
+        currency=session.get("currency") or "usd", payment_status="paid",
+        session_id=row["checkout_session_id"],
+        event_type="checkout.session.async_payment_succeeded",
+    )
+    payload = synthetic.encode(event)
+    resp = await _deliver(request, payload, synthetic.sign(payload, s.stripe_webhook_secret))
+    msg, level = _describe(resp)
+    return _redirect(request, msg, level, to="/")
 
 
 @router.post("/faults")

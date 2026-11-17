@@ -5,6 +5,7 @@ Run with: uvicorn app.main:create_app --factory
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,8 +18,21 @@ from app.config import Settings
 from app.worker import OrderApiClient, Worker
 
 
+def _configure_logging() -> None:
+    """Send the app's own loggers (webhook_sync.*) to stderr next to uvicorn's logs."""
+    logger = logging.getLogger("webhook_sync")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+                                               "%H:%M:%S"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    _configure_logging()
     db.init_db(settings.database_path)
 
     @asynccontextmanager

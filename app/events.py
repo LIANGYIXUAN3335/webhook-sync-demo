@@ -7,7 +7,10 @@ from dataclasses import dataclass
 
 from app import db
 
-HANDLED_TYPES = {"checkout.session.completed"}
+# checkout.session.completed is final for card payments. For delayed methods (bank debits
+# etc.) it arrives with payment_status="unpaid" and the money is confirmed later by
+# checkout.session.async_payment_succeeded, which carries the same Checkout Session.
+HANDLED_TYPES = {"checkout.session.completed", "checkout.session.async_payment_succeeded"}
 
 
 @dataclass
@@ -119,3 +122,19 @@ def replay_event(path: str, event_id: str, max_attempts: int) -> bool:
             (max_attempts, now, now, event_id),
         )
     return cur.rowcount == 1
+
+
+def replay_all_failed(path: str, max_attempts: int) -> int:
+    """Bulk version of replay_event, e.g. after a downstream outage is fixed."""
+    now = time.time()
+    with db.transaction(path) as conn:
+        cur = conn.execute(
+            """
+            UPDATE events SET status = 'pending', cycle_attempts = 0, max_attempts = ?,
+                next_attempt_at = ?, replay_count = replay_count + 1,
+                completed_at = NULL, updated_at = ?
+            WHERE status = 'failed'
+            """,
+            (max_attempts, now, now),
+        )
+    return cur.rowcount

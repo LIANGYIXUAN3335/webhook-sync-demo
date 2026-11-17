@@ -90,8 +90,8 @@ def sync_event(row, client: OrderApiClient) -> Outcome:
     if not session.get("id"):
         return Outcome("failed", "event has no checkout session id")
     if session.get("payment_status") != "paid":
-        return Outcome("ignored", f"payment_status={session.get('payment_status')!r}; "
-                                  "nothing to sync until the payment succeeds")
+        return Outcome("ignored", f"payment_status={session.get('payment_status')!r}; waiting for "
+                                  "checkout.session.async_payment_succeeded")
 
     try:
         resp = client.mark_paid(row["order_id"], session, row["id"])

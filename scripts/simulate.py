@@ -30,6 +30,7 @@ def cmd_checkout(args, settings: Settings) -> int:
     event = synthetic.build_checkout_completed_event(
         args.order_id, amount_total=amount, currency=currency,
         payment_status="unpaid" if args.unpaid else "paid",
+        event_type=args.type,
     )
     payload = synthetic.encode(event)
     secret = "whsec_wrong_secret" if args.bad_signature else settings.stripe_webhook_secret
@@ -70,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--deliveries", type=int, default=1, help="send the same event N times")
     p.add_argument("--unpaid", action="store_true", help="payment_status=unpaid")
     p.add_argument("--bad-signature", action="store_true", help="sign with the wrong secret")
+    p.add_argument("--type", default="checkout.session.completed",
+                   choices=["checkout.session.completed", "checkout.session.async_payment_succeeded",
+                            "checkout.session.expired"])
     p.set_defaults(func=cmd_checkout)
 
     p = sub.add_parser("fault", help="queue faults on the mock order service")

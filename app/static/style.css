@@ -136,3 +136,5 @@ select, input[type=number] { font: inherit; font-size: 13px; padding: 6px 8px; b
 }
 h1.mono { font-size: 16px; }
 table.events td.err { min-width: 220px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.card-head h2 { margin: 0; }

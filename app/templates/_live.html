@@ -45,6 +45,9 @@
           {% if e.status == 'failed' %}
           <form method="post" action="/events/{{ e.id }}/replay"><button class="btn btn-sm btn-primary">Replay</button></form>
           {% endif %}
+          {% if settings.enable_simulator and e.status == 'ignored' and e.type == 'checkout.session.completed' and e.order_id %}
+          <form method="post" action="/simulate/async-succeeded/{{ e.id }}"><button class="btn btn-sm" title="Send checkout.session.async_payment_succeeded for the same Checkout Session">Settle payment</button></form>
+          {% endif %}
           {% if settings.enable_simulator %}
           <form method="post" action="/simulate/redeliver/{{ e.id }}"><button class="btn btn-sm" title="Deliver the same event ID again (duplicate delivery)">Redeliver</button></form>
           {% endif %}
