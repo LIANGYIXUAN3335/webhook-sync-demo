@@ -1,0 +1,88 @@
+{% macro status_badge(status) -%}
+<span class="badge badge-{{ status }}">{{ status }}</span>
+{%- endmacro %}
+
+{% macro stats() -%}
+<section class="stats" data-live="stats">
+  {% set total = counts.values()|sum %}
+  <a class="stat {% if not status_filter %}active{% endif %}" href="/">
+    <span class="stat-n">{{ total }}</span><span class="stat-l">all events</span>
+  </a>
+  {% for s in statuses %}
+  <a class="stat stat-{{ s }} {% if status_filter == s %}active{% endif %}" href="/?status={{ s }}">
+    <span class="stat-n">{{ counts.get(s, 0) }}</span><span class="stat-l">{{ s }}</span>
+  </a>
+  {% endfor %}
+</section>
+{%- endmacro %}
+
+{% macro events_table() -%}
+<div class="table-wrap" data-live="events">
+  <table class="events">
+    <thead>
+      <tr>
+        <th>Event</th><th>Order</th><th>Status</th>
+        <th class="num" title="attempts in current cycle / budget (total attempts)">Attempts</th>
+        <th class="num" title="times Stripe delivered this event ID">Deliveries</th>
+        <th>Next attempt</th><th>Last error</th><th>Received</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for e in events %}
+      <tr class="row-{{ e.status }}">
+        <td>
+          <a class="mono" href="/events/{{ e.id }}">{{ e.id[:22] }}{% if e.id|length > 22 %}…{% endif %}</a>
+          <div class="sub">{{ e.type }}</div>
+        </td>
+        <td class="mono">{{ e.order_id or '—' }}</td>
+        <td>{{ status_badge(e.status) }}{% if e.replay_count %}<div class="sub">replayed ×{{ e.replay_count }}</div>{% endif %}</td>
+        <td class="num">{{ e.cycle_attempts }}/{{ e.max_attempts }}{% if e.attempts != e.cycle_attempts %} <span class="sub">({{ e.attempts }})</span>{% endif %}</td>
+        <td class="num">{{ e.delivery_count }}</td>
+        <td>{% if e.status == 'retrying' %}{{ e.next_attempt_at|relative }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="err">{% if e.last_error %}<span title="{{ e.last_error }}">{% if e.status == 'succeeded' %}recovered from: {% endif %}{{ e.last_error|truncate(90) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="mono sub">{{ e.received_at|time }}</td>
+        <td class="actions">
+          {% if e.status == 'failed' %}
+          <form method="post" action="/events/{{ e.id }}/replay"><button class="btn btn-sm btn-primary">Replay</button></form>
+          {% endif %}
+          {% if settings.enable_simulator %}
+          <form method="post" action="/simulate/redeliver/{{ e.id }}"><button class="btn btn-sm" title="Deliver the same event ID again (duplicate delivery)">Redeliver</button></form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">No events{% if status_filter %} with status “{{ status_filter }}”{% endif %} yet. Send one with the simulator or the Stripe CLI.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}
+
+{% macro orders_table() -%}
+<div data-live="orders">
+  <table class="compact">
+    <thead><tr><th>Order</th><th class="num">Amount</th><th>Status</th><th class="num" title="Times the order service changed this order. Must never exceed 1.">Updates</th></tr></thead>
+    <tbody>
+    {% for o in orders %}
+      <tr>
+        <td><span class="mono">{{ o.id }}</span><div class="sub">{{ o.customer_email }}</div></td>
+        <td class="num">{{ o.amount_cents|money(o.currency) }}</td>
+        <td><span class="badge badge-{{ 'succeeded' if o.status == 'paid' else 'pending' }}">{{ o.status }}</span></td>
+        <td class="num"><span class="count {% if o.update_count > 1 %}count-bad{% elif o.update_count == 1 %}count-ok{% endif %}">{{ o.update_count }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}
+
+{% macro fault_queue() -%}
+<div class="fault-queue" data-live="faults">
+  {% if faults %}
+    <span class="sub">Next order-service calls will get:</span>
+    <ol class="chips">{% for f in faults %}<li class="chip">{{ f }}</li>{% endfor %}</ol>
+  {% else %}
+    <span class="sub">No faults queued — order service is healthy.</span>
+  {% endif %}
+</div>
+{%- endmacro %}

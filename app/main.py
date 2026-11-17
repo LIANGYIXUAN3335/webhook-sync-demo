@@ -6,11 +6,13 @@ Run with: uvicorn app.main:create_app --factory
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
+from fastapi.staticfiles import StaticFiles
 
-from app import db, oms, webhooks
+from app import dashboard, db, oms, webhooks
 from app.config import Settings
 from app.worker import OrderApiClient, Worker
 
@@ -35,8 +37,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Webhook Sync Demo", lifespan=lifespan)
     app.state.settings = settings
+    app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
     app.include_router(webhooks.router)
     app.include_router(oms.router)
+    app.include_router(dashboard.router)
 
     @app.get("/healthz")
     def healthz() -> dict:

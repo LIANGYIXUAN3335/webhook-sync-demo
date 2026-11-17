@@ -1,0 +1,5 @@
+{% from "_live.html" import stats, events_table, orders_table, fault_queue with context %}
+{{ stats() }}
+{{ events_table() }}
+{{ orders_table() }}
+{{ fault_queue() }}

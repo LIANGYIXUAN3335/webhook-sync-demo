@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_live.html" import status_badge %}
+{% block title %}Event {{ event.id }}{% endblock %}
+{% block content %}
+<p><a href="/">← All events</a></p>
+<div class="page-head">
+  <div>
+    <h1 class="mono">{{ event.id }}</h1>
+    <p class="muted">{{ event.type }} · {{ 'live' if event.livemode else 'test mode' }}</p>
+  </div>
+  <div class="row">
+    {% if event.status == 'failed' %}
+    <form method="post" action="/events/{{ event.id }}/replay"><button class="btn btn-primary">Replay event</button></form>
+    {% endif %}
+    {% if settings.enable_simulator %}
+    <form method="post" action="/simulate/redeliver/{{ event.id }}"><button class="btn">Redeliver (duplicate)</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="layout">
+  <section class="card card-main">
+    <h2>Sync state</h2>
+    <dl class="kv">
+      <dt>Status</dt><dd>{{ status_badge(event.status) }}</dd>
+      <dt>Attempts</dt><dd>{{ event.cycle_attempts }}/{{ event.max_attempts }} this cycle · {{ event.attempts }} total · replayed {{ event.replay_count }}×</dd>
+      <dt>Deliveries</dt><dd>{{ event.delivery_count }} (last {{ event.last_delivery_at|time }})</dd>
+      <dt>Next attempt</dt><dd>{% if event.status == 'retrying' %}{{ event.next_attempt_at|time }} ({{ event.next_attempt_at|relative }}){% else %}—{% endif %}</dd>
+      <dt>Last error</dt><dd class="err">{{ event.last_error or '—' }}</dd>
+      <dt>Checkout session</dt><dd class="mono">{{ event.checkout_session_id or '—' }}</dd>
+      <dt>Order</dt><dd class="mono">{% if order %}{{ order.id }} — {{ order.status }}, updated {{ order.update_count }}×{% else %}{{ event.order_id or '—' }}{% endif %}</dd>
+      <dt>Received</dt><dd>{{ event.received_at|time }}</dd>
+    </dl>
+
+    <h2>Attempt log</h2>
+    <div class="table-wrap">
+    <table class="compact">
+      <thead><tr><th class="num">#</th><th>Started</th><th>Outcome</th><th class="num">HTTP</th><th>Detail</th></tr></thead>
+      <tbody>
+      {% for a in attempts %}
+        <tr>
+          <td class="num">{{ a.attempt_no }}</td>
+          <td class="mono">{{ a.started_at|time }}</td>
+          <td>{% if a.outcome %}{{ status_badge({'retry': 'retrying'}.get(a.outcome, a.outcome)) }}{% else %}<span class="muted">in flight</span>{% endif %}</td>
+          <td class="num">{{ a.http_status or '—' }}</td>
+          <td class="err">{{ a.error or '' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">No attempts yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  <aside class="side">
+    <section class="card">
+      <h2>Raw payload <span class="muted">· as verified</span></h2>
+      <pre class="code">{{ payload }}</pre>
+    </section>
+  </aside>
+</div>
+{% endblock %}

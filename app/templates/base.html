@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Webhook Sync{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true"></span>
+        Webhook Sync <span class="muted">· admin</span>
+      </a>
+      <nav class="nav">
+        <a href="/">Events</a>
+        <a href="/mock-oms/orders" target="_blank">OMS JSON</a>
+        <a href="/api/events" target="_blank">Events JSON</a>
+        <a href="/docs" target="_blank">API docs</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    {% if msg %}<div class="flash flash-{{ level }}" role="status">{{ msg }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="wrap footer muted">
+    Synthetic data only · secrets read from environment ·
+    max {{ settings.max_attempts }} attempts, backoff {{ settings.retry_base_seconds|round(1) }}s → {{ settings.retry_max_seconds|round(0)|int }}s cap
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

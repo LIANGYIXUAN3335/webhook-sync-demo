@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_live.html" import stats, events_table, orders_table, fault_queue with context %}
+{% block title %}Webhook Sync Dashboard{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Stripe webhook events</h1>
+    <p class="muted">checkout.session.completed → verified → stored → synced to the order service with bounded retries.</p>
+  </div>
+  <label class="toggle"><input type="checkbox" id="pause"> Pause auto-refresh</label>
+</div>
+
+{{ stats() }}
+
+<div class="layout">
+  <section class="card card-main">
+    <h2>Events{% if status_filter %} <span class="muted">· {{ status_filter }}</span>{% endif %}</h2>
+    {{ events_table() }}
+  </section>
+
+  <aside class="side">
+    <section class="card">
+      <h2>Orders <span class="muted">· mock OMS</span></h2>
+      {{ orders_table() }}
+    </section>
+
+    {% if settings.enable_simulator %}
+    <section class="card">
+      <h2>Offline simulator</h2>
+      <p class="sub">Builds a synthetic event, signs it with <code>STRIPE_WEBHOOK_SECRET</code>, and POSTs it to <code>/webhooks/stripe</code>.</p>
+      <form method="post" action="/simulate/checkout" class="form">
+        <label>Order
+          <select name="order_id">
+            {% for o in orders %}<option value="{{ o.id }}">{{ o.id }} · {{ o.amount_cents|money(o.currency) }}{% if o.status == 'paid' %} (paid){% endif %}</option>{% endfor %}
+            <option value="ord_does_not_exist">ord_does_not_exist (→ 404, permanent)</option>
+            <option value="__none__">no order reference (→ permanent)</option>
+          </select>
+        </label>
+        <div class="row">
+          <label>payment_status
+            <select name="payment_status"><option>paid</option><option>unpaid</option></select>
+          </label>
+          <label>Signature
+            <select name="signature"><option value="valid">valid</option><option value="invalid">invalid (→ 400)</option></select>
+          </label>
+        </div>
+        <button class="btn btn-primary">Send checkout.session.completed</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Fault injection <span class="muted">· order service</span></h2>
+      <form method="post" action="/faults" class="form">
+        <label>Next call(s) will
+          <select name="mode">
+            {% for mode, label in fault_modes.items() %}<option value="{{ mode }}">{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="row">
+          <label>Times <input type="number" name="count" value="1" min="1" max="20"></label>
+          <button class="btn">Queue fault</button>
+        </div>
+      </form>
+      {{ fault_queue() }}
+      <div class="row row-end">
+        <form method="post" action="/faults/clear"><button class="btn btn-sm">Clear faults</button></form>
+        <form method="post" action="/demo/reset" onsubmit="return confirm('Delete all events and reset synthetic orders?')"><button class="btn btn-sm btn-danger">Reset demo data</button></form>
+      </div>
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Poll the server-rendered fragment and swap the live regions in place.
+  (function () {
+    const status = {{ (status_filter or '')|tojson }};
+    const pause = document.getElementById('pause');
+    try { pause.checked = localStorage.getItem('pauseRefresh') === '1'; } catch (e) {}
+    pause.addEventListener('change', () => { try { localStorage.setItem('pauseRefresh', pause.checked ? '1' : '0'); } catch (e) {} });
+    async function refresh() {
+      if (pause.checked || document.hidden) return;
+      try {
+        const r = await fetch('/partials/live' + (status ? '?status=' + encodeURIComponent(status) : ''));
+        if (!r.ok) return;
+        const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+        doc.querySelectorAll('[data-live]').forEach((fresh) => {
+          const cur = document.querySelector('[data-live="' + fresh.dataset.live + '"]');
+          if (cur) cur.replaceWith(fresh);
+        });
+      } catch (e) { /* server restarting; try again next tick */ }
+    }
+    setInterval(refresh, 1500);
+  })();
+</script>
+{% endblock %}

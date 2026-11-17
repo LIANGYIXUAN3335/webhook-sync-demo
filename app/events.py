@@ -97,3 +97,25 @@ def status_counts(path: str) -> dict[str, int]:
     with db.session(path) as conn:
         rows = conn.execute("SELECT status, COUNT(*) AS n FROM events GROUP BY status").fetchall()
     return {r["status"]: r["n"] for r in rows}
+
+
+def replay_event(path: str, event_id: str, max_attempts: int) -> bool:
+    """Re-queue a failed event with a fresh retry budget.
+
+    Only `failed` events can be replayed; succeeded/in-flight events are left alone.
+    Replaying is safe even if the order was in fact updated (e.g. the last attempt timed
+    out after the order service committed): the order service's idempotency key turns
+    the repeated call into a no-op.
+    """
+    now = time.time()
+    with db.transaction(path) as conn:
+        cur = conn.execute(
+            """
+            UPDATE events SET status = 'pending', cycle_attempts = 0, max_attempts = ?,
+                next_attempt_at = ?, replay_count = replay_count + 1,
+                completed_at = NULL, updated_at = ?
+            WHERE id = ? AND status = 'failed'
+            """,
+            (max_attempts, now, now, event_id),
+        )
+    return cur.rowcount == 1
