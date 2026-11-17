@@ -16,6 +16,17 @@ templates.
 - **Neither replays nor duplicate deliveries can update the same order twice.**
 - Two reproducible demo paths: the **Stripe CLI** against a sandbox, and a **fully offline
   simulator**. All order data is synthetic (`*@example.test`).
+- One command (`make demo`) runs all 8 demo scenarios against the live server and prints a
+  pass/fail report. CI runs the linter, the 40 tests, and the same end-to-end demo.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+<details>
+<summary>Event detail: idempotency key and attempt timeline with backoff</summary>
+
+![Event detail](docs/screenshots/event-detail.png)
+
+</details>
 
 ---
 
@@ -24,19 +35,45 @@ templates.
 Requires Python 3.10+ (developed on 3.12).
 
 ```bash
-python3 -m venv .venv            # or: uv venv --python 3.12 .venv
-.venv/bin/pip install -r requirements.txt   # or: uv pip install --python .venv/bin/python -r requirements.txt
+make setup   # .venv + dev dependencies + .env from .env.example (uses uv if installed)
+make run     # http://127.0.0.1:8000
+```
+
+In a second terminal:
+
+```bash
+make test    # 40 tests, ~3 s, no network
+make demo    # all 8 scenarios end to end against the running server (~30 s)
+make lint    # ruff lint + format check
+```
+
+Without `make`:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env             # the defaults work for the offline demo
 .venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
+.venv/bin/python -m pytest -v
 ```
 
 Open **http://127.0.0.1:8000**. The SQLite file is created at `data/webhook_sync.db`, and
 six synthetic orders (`ord_demo_1001` … `ord_demo_1006`) are seeded.
 
-Run the tests:
+`make demo` prints something like:
 
-```bash
-.venv/bin/python -m pytest -v
+```
+  PASS  Happy path                                 0.6s  succeeded on attempt 1, order paid
+  PASS  Duplicate delivery (same event ID ×3)      0.5s  3 deliveries → 1 event, 1 attempt, 1 order update
+  PASS  Invalid signature                          0.0s  HTTP 400, nothing stored
+  PASS  Transient failures, then recovery          9.2s  503 → 503 → timeout → succeeded (4 attempts)
+  PASS  Retries exhausted, then manual replay     12.4s  failed after 5 attempts → replay → succeeded; order updated once
+  PASS  Response lost after commit                 3.4s  commit + timeout → retry is an idempotent no-op
+  PASS  Permanent error                            0.5s  HTTP 404 → failed after 1 attempt, no retries
+  PASS  Async payment (unpaid → settled)           1.1s  unpaid → ignored; async_payment_succeeded → paid
+
+Max updates applied to any single order: 1 (must be <= 1)
+8/8 scenarios passed. Open http://127.0.0.1:8000 to inspect them.
 ```
 
 ---
@@ -71,10 +108,14 @@ pending ──claim──► processing ──2xx──────────�
                        │  ├──other 4xx, no order reference ──────────────────────────► failed
                        │  └──retry budget exhausted ─────────────────────────────────► failed
                        └──payment_status ≠ paid ─────────────────────────────────────► ignored
-failed ──(manual replay: fresh budget)──► pending
+failed ──(manual replay or "Replay all failed": fresh budget)──► pending
 ```
 
-Event types other than `checkout.session.completed` are verified and stored as `ignored`.
+`checkout.session.completed` and `checkout.session.async_payment_succeeded` are synced. A
+completed session that is still `unpaid` (delayed payment methods) is stored as `ignored`
+until its `async_payment_succeeded` event arrives. That event carries the same Checkout
+Session, so the order is still updated once. Other event types are verified and stored as
+`ignored`.
 
 ### Retry policy
 
@@ -136,10 +177,12 @@ over.
 | 6 | Manual replay | Click **Replay** on the failed event | `pending` → `succeeded`, "replayed ×1", total attempts (6); Updates = 1 |
 | 7 | Lost response | Fault: `timeout_after_commit`; send `ord_demo_1004` | first attempt times out but the order is already paid; retry ends as an idempotent no-op; Updates = 1 |
 | 8 | Permanent error | Send `ord_does_not_exist` (404), or queue fault `400` | `failed` after 1 attempt, no retries |
-| 9 | Unpaid session | payment_status = *unpaid* | `ignored`; order untouched |
+| 9 | Unpaid session, then it settles | payment_status = *unpaid*, then **Settle payment** on that row | `ignored`, then an `async_payment_succeeded` event for the same session → `succeeded`; Updates = 1 |
+| 10 | Bulk recovery | After a few failures, clear the faults and click **Replay all failed** | all failed events go back to `pending`, then `succeeded` |
 
-Click any event ID to see its attempt log (timestamps show the backoff), the verified raw
-payload, and the linked order.
+Click any event ID to see the idempotency key it uses, an attempt timeline (the backoff it
+waited before each attempt and how long each attempt took), the verified raw payload, and
+the linked order. Use the search box to filter by `evt_…`, `ord_…` or `cs_…`.
 
 The same flows also work from a terminal, sending real HTTP requests to the running server:
 
@@ -147,6 +190,7 @@ The same flows also work from a terminal, sending real HTTP requests to the runn
 .venv/bin/python -m scripts.simulate checkout ord_demo_1001
 .venv/bin/python -m scripts.simulate checkout ord_demo_1002 --deliveries 3   # duplicate delivery
 .venv/bin/python -m scripts.simulate checkout ord_demo_1003 --bad-signature  # → HTTP 400
+.venv/bin/python -m scripts.simulate checkout ord_demo_1004 --type checkout.session.async_payment_succeeded
 .venv/bin/python -m scripts.simulate fault 503 --count 5                     # then send an event
 .venv/bin/python -m scripts.simulate events                                  # print sync state
 ```
@@ -167,7 +211,7 @@ Requires the [Stripe CLI](https://docs.stripe.com/stripe-cli) and a Stripe sandb
 2. Start the app (Quick start).
 3. In a second terminal, forward sandbox events to the app:
    ```bash
-   stripe listen --events checkout.session.completed --forward-to 127.0.0.1:8000/webhooks/stripe
+   stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to 127.0.0.1:8000/webhooks/stripe
    ```
 4. Produce a `checkout.session.completed` event:
    - **(a) Real Checkout for a synthetic order (recommended):**
@@ -195,10 +239,10 @@ Requires the [Stripe CLI](https://docs.stripe.com/stripe-cli) and a Stripe sandb
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -v
+make test        # or: .venv/bin/python -m pytest -v
 ```
 
-The tests drive the worker directly, with a fake clock and an HTTP transport that routes
+40 tests, about 3 s. The tests drive the worker directly, with a fake clock and an HTTP transport that routes
 to the in-app mock order service and can inject timeouts and connection errors. So the
 retry and backoff behavior is deterministic and needs no sleeps or network.
 
@@ -210,8 +254,14 @@ retry and backoff behavior is deterministic and needs no sleeps or network.
 | Retries exhausted | `test_worker.py::test_retries_exhausted_moves_to_failed`, `test_backoff_is_exponential_and_capped` |
 | Permanent errors | `test_worker.py::test_permanent_errors_fail_without_retry`, `test_event_without_order_reference_fails_permanently`, `test_second_session_for_paid_order_is_flagged_not_applied` |
 | Manual replay | `test_replay_and_dashboard.py::test_manual_replay_recovers_failed_event`, `test_replay_after_ambiguous_commit_does_not_double_update`, `test_replay_is_refused_unless_failed`, `test_replays_and_redeliveries_together_update_order_once` |
-| Worker safety | `test_expired_processing_lease_is_reclaimed`, `test_stale_worker_cannot_overwrite_newer_result` |
-| Dashboard / simulator | `test_dashboard_shows_status_attempts_and_last_error`, `test_simulator_posts_through_signature_verification`, `test_fault_controls_and_reset`, `test_simulator_can_be_disabled` |
+| Worker safety | `test_hardening.py::test_concurrent_workers_update_each_order_once` (4 workers racing over duplicates), `test_expired_processing_lease_is_reclaimed`, `test_stale_worker_cannot_overwrite_newer_result` |
+| Async payments | `test_hardening.py::test_async_payment_unpaid_then_succeeded_updates_order_once`, `test_simulator_settle_payment_action` |
+| Dashboard / simulator | `test_dashboard_shows_status_attempts_and_last_error`, `test_search_filters_by_order_event_or_session_id`, `test_event_detail_shows_idempotency_key_and_backoff_timeline`, `test_simulator_posts_through_signature_verification`, `test_fault_controls_and_reset`, `test_simulator_can_be_disabled`, `test_hardening.py::test_replay_all_failed`, `test_flash_redirect_never_leaves_the_site` |
+
+Beyond unit tests, `make demo` (`scripts/demo_all.py`) checks the same behavior end to end
+over real HTTP: a real 2 s client timeout, the in-process mock order service, and the
+background worker thread. The GitHub Actions workflow (`.github/workflows/ci.yml`) runs
+lint and tests on Python 3.10 and 3.12, then boots the server and runs `demo_all`.
 
 ---
 
@@ -249,10 +299,14 @@ app/
   dashboard.py   dashboard pages, replay, offline simulator endpoints
   synthetic.py   synthetic event builder + Stripe-scheme signer
   templates/     Jinja templates; static/style.css
+  static/app.js  live refresh, retry countdowns, flash cleanup (progressive enhancement)
 scripts/
   simulate.py                 offline CLI (signed events over HTTP, faults, status)
+  demo_all.py                 runs all demo scenarios end to end and reports pass/fail
   create_checkout_session.py  sandbox Checkout Session for a synthetic order
 tests/           pytest suite (see table above)
+docs/            screenshots, Chinese acceptance guide (验收指南)
+Makefile         setup / run / test / lint / demo
 ```
 
 ## Scope and production notes
@@ -267,8 +321,8 @@ This is a demo, sized to read in one sitting. For production, I'd change these:
 - **Order service.** The mock order service lives in the same process for convenience,
   but the worker reaches it only over HTTP via `ORDER_API_BASE_URL`, so pointing it at a
   real service needs no code change. The real service must honor `Idempotency-Key`.
-- **Payment details.** The worker checks `payment_status`. A real integration would also
-  handle `checkout.session.async_payment_succeeded`, and possibly compare `amount_total`
-  with the order total.
+- **Payment details.** A real integration would probably also handle
+  `checkout.session.async_payment_failed` (notify the customer), and compare `amount_total`
+  with the order total before marking it paid.
 - **Events are processed independently.** Stripe doesn't guarantee delivery order, so
   each event is handled on its own merits.
