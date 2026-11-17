@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app import db
+from app import db, webhooks
 from app.config import Settings
 
 
@@ -23,6 +23,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Webhook Sync Demo", lifespan=lifespan)
     app.state.settings = settings
+    app.include_router(webhooks.router)
 
     @app.get("/healthz")
     def healthz() -> dict:
