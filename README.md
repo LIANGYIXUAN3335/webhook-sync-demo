@@ -32,7 +32,7 @@ templates.
 
 ## Quick start
 
-Requires Python 3.10+ (developed on 3.12).
+Requires Python 3.11+ (developed on 3.12; FastAPI 0.163 needs 3.11).
 
 ```bash
 make setup   # .venv + dev dependencies + .env from .env.example (uses uv if installed)
@@ -261,7 +261,7 @@ retry and backoff behavior is deterministic and needs no sleeps or network.
 Beyond unit tests, `make demo` (`scripts/demo_all.py`) checks the same behavior end to end
 over real HTTP: a real 2 s client timeout, the in-process mock order service, and the
 background worker thread. The GitHub Actions workflow (`.github/workflows/ci.yml`) runs
-lint and tests on Python 3.10 and 3.12, then boots the server and runs `demo_all`.
+lint and tests on Python 3.11 and 3.12, then boots the server and runs `demo_all`.
 
 ---
 

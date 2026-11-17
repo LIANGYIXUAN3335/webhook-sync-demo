@@ -10,12 +10,12 @@ PORT    ?= 8000
 help:  ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
 
-setup:  ## Create .venv (Python 3.10+), install dev dependencies, create .env from the example
+setup:  ## Create .venv (Python 3.11+), install dev dependencies, create .env from the example
 	@if command -v uv >/dev/null 2>&1; then \
 		uv venv -q --python 3.12 $(VENV) && uv pip install -q --python $(BIN)/python -r requirements-dev.txt; \
 	else \
-		$(PY) -c 'import sys; sys.exit(sys.version_info < (3, 10))' || \
-			{ echo "Python 3.10+ required: run 'make setup PY=python3.12' (or install uv)"; exit 1; }; \
+		$(PY) -c 'import sys; sys.exit(sys.version_info < (3, 11))' || \
+			{ echo "Python 3.11+ required: run 'make setup PY=python3.12' (or install uv)"; exit 1; }; \
 		$(PY) -m venv $(VENV) && $(BIN)/pip install -q -r requirements-dev.txt; \
 	fi
 	@test -f .env || (cp .env.example .env && echo "created .env from .env.example")
