@@ -16,9 +16,15 @@
   <section class="card card-main">
     <div class="card-head">
       <h2>Events{% if status_filter %} <span class="muted">· {{ status_filter }}</span>{% endif %}</h2>
-      <form method="post" action="/events/replay-failed" onsubmit="return confirm('Re-queue every failed event with a fresh retry budget?')">
-        <button class="btn btn-sm">Replay all failed</button>
-      </form>
+      <div class="row">
+        <form method="get" action="/" class="search" role="search">
+          {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+          <input type="search" name="q" value="{{ q }}" placeholder="Search evt_ / ord_ / cs_ ID" aria-label="Search events">
+        </form>
+        <form method="post" action="/events/replay-failed" onsubmit="return confirm('Re-queue every failed event with a fresh retry budget?')">
+          <button class="btn btn-sm">Replay all failed</button>
+        </form>
+      </div>
     </div>
     {{ events_table() }}
   </section>
@@ -82,26 +88,6 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script>
-  // Poll the server-rendered fragment and swap the live regions in place.
-  (function () {
-    const status = {{ (status_filter or '')|tojson }};
-    const pause = document.getElementById('pause');
-    try { pause.checked = localStorage.getItem('pauseRefresh') === '1'; } catch (e) {}
-    pause.addEventListener('change', () => { try { localStorage.setItem('pauseRefresh', pause.checked ? '1' : '0'); } catch (e) {} });
-    async function refresh() {
-      if (pause.checked || document.hidden) return;
-      try {
-        const r = await fetch('/partials/live' + (status ? '?status=' + encodeURIComponent(status) : ''));
-        if (!r.ok) return;
-        const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-        doc.querySelectorAll('[data-live]').forEach((fresh) => {
-          const cur = document.querySelector('[data-live="' + fresh.dataset.live + '"]');
-          if (cur) cur.replaceWith(fresh);
-        });
-      } catch (e) { /* server restarting; try again next tick */ }
-    }
-    setInterval(refresh, 1500);
-  })();
-</script>
+<script>window.LIVE_QUERY = {{ {'status': status_filter or '', 'q': q}|tojson }};</script>
+<script src="{{ url_for('static', path='app.js') }}"></script>
 {% endblock %}

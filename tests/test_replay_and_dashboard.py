@@ -140,3 +140,24 @@ def test_simulator_can_be_disabled(settings):
         assert c.post("/simulate/checkout", data={"order_id": "ord_demo_1001"}).status_code == 404
         assert c.post("/faults", data={"mode": "503"}).status_code == 404
         assert "Offline simulator" not in c.get("/").text
+
+
+def test_search_filters_by_order_event_or_session_id(client, settings):
+    a = deliver(client, "ord_demo_1001")
+    b = deliver(client, "ord_demo_1002")
+    html = client.get("/?q=ord_demo_1002").text
+    assert b["id"][:22] in html and a["id"][:22] not in html
+    assert a["id"][:22] in client.get(f"/partials/live?q={a['data']['object']['id']}").text
+    assert "No events match" in client.get("/?q=nothing-here&status=failed").text
+
+
+def test_event_detail_shows_idempotency_key_and_backoff_timeline(client, settings, worker, clock):
+    oms.push_faults(settings.database_path, "503")
+    event = deliver(client)
+    worker.run_once()
+    clock.advance(1)
+    worker.run_once()
+    html = client.get(f"/events/{event['id']}").text
+    assert f"checkout_session:{event['data']['object']['id']}" in html
+    assert "+1.0 s" in html  # waited one backoff interval before attempt 2
+    assert "window.AUTO_RELOAD = false" in html  # terminal: no auto-reload

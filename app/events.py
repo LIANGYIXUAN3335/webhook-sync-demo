@@ -77,16 +77,22 @@ def get_event(path: str, event_id: str):
         return conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
 
-def list_events(path: str, status: str | None = None, limit: int = 200):
+def list_events(path: str, status: str | None = None, q: str | None = None, limit: int = 200):
+    """Newest first, optionally filtered by status and/or a search term that matches the
+    event ID, order ID, or Checkout Session ID."""
+    where, params = [], []
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    if q:
+        where.append("(id LIKE ? OR order_id LIKE ? OR checkout_session_id LIKE ?)")
+        params += [f"%{q}%"] * 3
+    sql = "SELECT * FROM events"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY received_at DESC LIMIT ?"
     with db.session(path) as conn:
-        if status:
-            return conn.execute(
-                "SELECT * FROM events WHERE status = ? ORDER BY received_at DESC LIMIT ?",
-                (status, limit),
-            ).fetchall()
-        return conn.execute(
-            "SELECT * FROM events ORDER BY received_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        return conn.execute(sql, (*params, limit)).fetchall()
 
 
 def list_attempts(path: str, event_id: str):

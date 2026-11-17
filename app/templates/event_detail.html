@@ -25,9 +25,10 @@
       <dt>Status</dt><dd>{{ status_badge(event.status) }}</dd>
       <dt>Attempts</dt><dd>{{ event.cycle_attempts }}/{{ event.max_attempts }} this cycle · {{ event.attempts }} total · replayed {{ event.replay_count }}×</dd>
       <dt>Deliveries</dt><dd>{{ event.delivery_count }} (last {{ event.last_delivery_at|time }})</dd>
-      <dt>Next attempt</dt><dd>{% if event.status == 'retrying' %}{{ event.next_attempt_at|time }} ({{ event.next_attempt_at|relative }}){% else %}—{% endif %}</dd>
-      <dt>Last error</dt><dd class="err">{{ event.last_error or '—' }}</dd>
+      <dt>Next attempt</dt><dd>{% if event.status == 'retrying' %}{{ event.next_attempt_at|time }} (<span class="countdown" data-at="{{ event.next_attempt_at }}">{{ event.next_attempt_at|relative }}</span>){% else %}—{% endif %}</dd>
+      <dt>Last error</dt><dd class="err">{% if event.last_error and event.status == 'succeeded' %}<span class="muted">recovered from:</span> {% endif %}{{ event.last_error or '—' }}</dd>
       <dt>Checkout session</dt><dd class="mono">{{ event.checkout_session_id or '—' }}</dd>
+      <dt>Idempotency-Key</dt><dd class="mono">{{ idempotency_key or '—' }}</dd>
       <dt>Order</dt><dd class="mono">{% if order %}{{ order.id }} — {{ order.status }}, updated {{ order.update_count }}×{% else %}{{ event.order_id or '—' }}{% endif %}</dd>
       <dt>Received</dt><dd>{{ event.received_at|time }}</dd>
     </dl>
@@ -35,18 +36,20 @@
     <h2>Attempt log</h2>
     <div class="table-wrap">
     <table class="compact">
-      <thead><tr><th class="num">#</th><th>Started</th><th>Outcome</th><th class="num">HTTP</th><th>Detail</th></tr></thead>
+      <thead><tr><th class="num">#</th><th>Started</th><th class="num" title="Backoff since the previous attempt finished">Waited</th><th class="num">Took</th><th>Outcome</th><th class="num">HTTP</th><th>Detail</th></tr></thead>
       <tbody>
-      {% for a in attempts %}
+      {% for t in timeline %}{% set a = t.a %}
         <tr>
           <td class="num">{{ a.attempt_no }}</td>
           <td class="mono">{{ a.started_at|time }}</td>
-          <td>{% if a.outcome %}{{ status_badge({'retry': 'retrying'}.get(a.outcome, a.outcome)) }}{% else %}<span class="muted">in flight</span>{% endif %}</td>
+          <td class="num sub">{% if t.waited is not none %}+{{ t.waited|duration }}{% else %}—{% endif %}</td>
+          <td class="num sub">{{ t.duration|duration }}</td>
+          <td>{% if a.outcome %}{{ status_badge({'retry': 'retrying'}.get(a.outcome, a.outcome)) }}{% else %}<span class="badge badge-processing">in flight</span>{% endif %}</td>
           <td class="num">{{ a.http_status or '—' }}</td>
           <td class="err">{{ a.error or '' }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="5" class="empty">No attempts yet.</td></tr>
+        <tr><td colspan="7" class="empty">No attempts yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -59,4 +62,8 @@
     </section>
   </aside>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>window.AUTO_RELOAD = {{ (not terminal)|tojson }};</script>
+<script src="{{ url_for('static', path='app.js') }}"></script>
 {% endblock %}

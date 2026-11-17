@@ -48,9 +48,17 @@ def _fmt_relative(ts: float | None) -> str:
 def _fmt_money(cents: int | None, currency: str = "usd") -> str:
     if cents is None:
         return "—"
-    return f"{cents / 100:,.2f} {currency.upper()}"
+    symbol = {"usd": "$", "eur": "€", "gbp": "£"}.get(currency.lower())
+    return f"{symbol}{cents / 100:,.2f}" if symbol else f"{cents / 100:,.2f} {currency.upper()}"
 
 
+def _fmt_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "—"
+    return f"{seconds * 1000:.0f} ms" if seconds < 1 else f"{seconds:.1f} s"
+
+
+templates.env.filters["duration"] = _fmt_duration
 templates.env.filters["time"] = _fmt_time
 templates.env.filters["relative"] = _fmt_relative
 templates.env.filters["money"] = _fmt_money
@@ -73,16 +81,17 @@ def _redirect(request: Request, msg: str, level: str = "info", to: str | None = 
     return RedirectResponse(f"{path}?{urlencode(query)}", status_code=303)
 
 
-def _live_context(request: Request, status: str | None) -> dict:
+def _live_context(request: Request, status: str | None, q: str | None = None) -> dict:
     s = _settings(request)
     path = s.database_path
     return {
         "request": request,
         "settings": s,
         "status_filter": status,
+        "q": q or "",
         "statuses": STATUSES,
         "counts": events.status_counts(path),
-        "events": events.list_events(path, status),
+        "events": events.list_events(path, status, q),
         "orders": oms.list_orders(path),
         "faults": oms.list_faults(path),
         "fault_modes": oms.FAULT_MODES,
@@ -98,21 +107,22 @@ def _require_simulator(request: Request) -> None:
 # --- pages ---------------------------------------------------------------------------
 
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, status: str | None = None, msg: str | None = None,
-              level: str = "info"):
+def dashboard(request: Request, status: str | None = None, q: str | None = None,
+              msg: str | None = None, level: str = "info"):
     if status not in STATUSES:
         status = None
-    ctx = _live_context(request, status)
+    ctx = _live_context(request, status, (q or "").strip() or None)
     ctx.update(msg=msg, level=level)
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 
 
 @router.get("/partials/live", response_class=HTMLResponse)
-def live_partial(request: Request, status: str | None = None):
+def live_partial(request: Request, status: str | None = None, q: str | None = None):
     """Auto-refresh fragment: counts, events table, orders, fault queue."""
     if status not in STATUSES:
         status = None
-    return templates.TemplateResponse(request, "_live_partial.html", _live_context(request, status))
+    return templates.TemplateResponse(request, "_live_partial.html",
+                                      _live_context(request, status, (q or "").strip() or None))
 
 
 @router.get("/events/{event_id}", response_class=HTMLResponse)
@@ -123,9 +133,20 @@ def event_detail(request: Request, event_id: str, msg: str | None = None, level:
         raise HTTPException(404, "event not found")
     payload = json.dumps(json.loads(row["payload"]), indent=2)
     order = oms.get_order(path, row["order_id"]) if row["order_id"] else None
+    attempts = events.list_attempts(path, event_id)
+    timeline, prev_finished = [], None
+    for a in attempts:
+        timeline.append({
+            "a": a,
+            "duration": (a["finished_at"] - a["started_at"]) if a["finished_at"] else None,
+            "waited": (a["started_at"] - prev_finished) if prev_finished else None,
+        })
+        prev_finished = a["finished_at"] or prev_finished
     return templates.TemplateResponse(request, "event_detail.html", {
         "request": request, "event": row, "payload": payload, "order": order,
-        "attempts": events.list_attempts(path, event_id),
+        "timeline": timeline,
+        "idempotency_key": f"checkout_session:{row['checkout_session_id']}" if row["checkout_session_id"] else None,
+        "terminal": row["status"] in {"succeeded", "failed", "ignored"},
         "settings": _settings(request), "msg": msg, "level": level,
     })
 

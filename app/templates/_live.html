@@ -5,11 +5,11 @@
 {% macro stats() -%}
 <section class="stats" data-live="stats">
   {% set total = counts.values()|sum %}
-  <a class="stat {% if not status_filter %}active{% endif %}" href="/">
+  <a class="stat {% if not status_filter %}active{% endif %}" href="/{% if q %}?q={{ q|urlencode }}{% endif %}">
     <span class="stat-n">{{ total }}</span><span class="stat-l">all events</span>
   </a>
   {% for s in statuses %}
-  <a class="stat stat-{{ s }} {% if status_filter == s %}active{% endif %}" href="/?status={{ s }}">
+  <a class="stat stat-{{ s }} {% if status_filter == s %}active{% endif %}" href="/?status={{ s }}{% if q %}&q={{ q|urlencode }}{% endif %}">
     <span class="stat-n">{{ counts.get(s, 0) }}</span><span class="stat-l">{{ s }}</span>
   </a>
   {% endfor %}
@@ -24,23 +24,26 @@
         <th>Event</th><th>Order</th><th>Status</th>
         <th class="num" title="attempts in current cycle / budget (total attempts)">Attempts</th>
         <th class="num" title="times Stripe delivered this event ID">Deliveries</th>
-        <th>Next attempt</th><th>Last error</th><th>Received</th><th></th>
+        <th>Last error</th><th></th>
       </tr>
     </thead>
     <tbody>
     {% for e in events %}
       <tr class="row-{{ e.status }}">
         <td>
-          <a class="mono" href="/events/{{ e.id }}">{{ e.id[:22] }}{% if e.id|length > 22 %}…{% endif %}</a>
-          <div class="sub">{{ e.type }}</div>
+          <a class="mono" href="/events/{{ e.id }}" title="{{ e.id }}">{{ e.id[:20] }}{% if e.id|length > 20 %}…{% endif %}</a>
+          <div class="sub nowrap">{{ e.type }}</div>
+          <div class="sub mono">{{ e.received_at|time }}</div>
         </td>
         <td class="mono">{{ e.order_id or '—' }}</td>
-        <td>{{ status_badge(e.status) }}{% if e.replay_count %}<div class="sub">replayed ×{{ e.replay_count }}</div>{% endif %}</td>
+        <td>
+          {{ status_badge(e.status) }}
+          {% if e.status == 'retrying' %}<div class="sub">next <span class="countdown" data-at="{{ e.next_attempt_at }}">{{ e.next_attempt_at|relative }}</span></div>{% endif %}
+          {% if e.replay_count %}<div class="sub">replayed ×{{ e.replay_count }}</div>{% endif %}
+        </td>
         <td class="num">{{ e.cycle_attempts }}/{{ e.max_attempts }}{% if e.attempts != e.cycle_attempts %} <span class="sub">({{ e.attempts }})</span>{% endif %}</td>
         <td class="num">{{ e.delivery_count }}</td>
-        <td>{% if e.status == 'retrying' %}{{ e.next_attempt_at|relative }}{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td class="err">{% if e.last_error %}<span title="{{ e.last_error }}">{% if e.status == 'succeeded' %}recovered from: {% endif %}{{ e.last_error|truncate(90) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td class="mono sub">{{ e.received_at|time }}</td>
+        <td class="err">{% if e.last_error %}<span title="{{ e.last_error }}">{% if e.status == 'succeeded' %}recovered from: {% endif %}{{ e.last_error|truncate(110) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="actions">
           {% if e.status == 'failed' %}
           <form method="post" action="/events/{{ e.id }}/replay"><button class="btn btn-sm btn-primary">Replay</button></form>
@@ -54,7 +57,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="9" class="empty">No events{% if status_filter %} with status “{{ status_filter }}”{% endif %} yet. Send one with the simulator or the Stripe CLI.</td></tr>
+      <tr><td colspan="7" class="empty">{% if q or status_filter %}No events match{% if status_filter %} status “{{ status_filter }}”{% endif %}{% if q %} search “{{ q }}”{% endif %}.{% else %}No events yet. Send one with the simulator or the Stripe CLI.{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table>
