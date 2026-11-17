@@ -8,9 +8,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
 
-from app import db, webhooks
+from app import db, oms, webhooks
 from app.config import Settings
+from app.worker import OrderApiClient, Worker
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -19,11 +21,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        yield
+        worker = None
+        if settings.worker_enabled:
+            client = OrderApiClient(settings.order_api_base_url, settings.order_api_timeout_seconds)
+            worker = Worker(settings, client)
+            worker.start()
+        app.state.worker = worker
+        try:
+            yield
+        finally:
+            if worker:
+                await run_in_threadpool(worker.stop)
 
     app = FastAPI(title="Webhook Sync Demo", lifespan=lifespan)
     app.state.settings = settings
     app.include_router(webhooks.router)
+    app.include_router(oms.router)
 
     @app.get("/healthz")
     def healthz() -> dict:
